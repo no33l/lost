@@ -1,0 +1,141 @@
+@import "tailwindcss";
+
+/*
+  Design-Tokens der Lost.-Plattform.
+  Schriften kommen als CSS-Variablen aus next/font (src/app/layout.tsx) -
+  ein späterer Tausch gegen Styrene/Copernicus ist damit ein Einzeiler dort.
+*/
+
+@theme inline {
+  --font-sans: var(--font-figtree), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: var(--font-fraunces), "Iowan Old Style", Georgia, serif;
+}
+
+@theme {
+  /* Basis: warmes Creme statt klinischem Weiß */
+  --color-paper: #fbf7f0;
+  --color-paper-soft: #f4ecdf;
+  --color-card: #fffdf9;
+
+  /* Text */
+  --color-ink: #26221c;
+  --color-ink-soft: #675f51;
+  --color-ink-faint: #9b9184;
+  --color-line: #e7decf;
+
+  /* Terrakotta/Koralle - primäre Aktionsfarbe (AA-Kontrast auf Weiß) */
+  --color-coral: #c4502f;
+  --color-coral-bright: #e0714b;
+  --color-coral-soft: #fae7de;
+
+  /* Tiefes Grün - Erdung */
+  --color-pine: #2e5e4e;
+  --color-pine-soft: #e2ede7;
+
+  /* Sanftes Lila - das „Zwischen den Welten" */
+  --color-lilac: #7c6baa;
+  --color-lilac-soft: #ece7f6;
+
+  /* Warmes Amber */
+  --color-amber: #a56a12;
+  --color-amber-bright: #e9a23b;
+  --color-amber-soft: #faefda;
+
+  /* Dunkle Flächen (Footer, Kontrast-Sektionen) */
+  --color-night: #221d16;
+
+  --color-danger: #b3372b;
+  --color-danger-soft: #f9e3e0;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-paper font-sans text-ink antialiased;
+    font-feature-settings: "ss01";
+  }
+
+  ::selection {
+    background: var(--color-coral-bright);
+    color: #fff;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-coral);
+    outline-offset: 2px;
+  }
+}
+
+/* Scroll-Reveal - vom <Reveal>-Wrapper (components/site/Reveal.tsx) gesteuert */
+.reveal {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+/* Sanftes Schweben für die Gesichter-Collage */
+@keyframes float-a {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(-2deg);
+  }
+  50% {
+    transform: translate(6px, -14px) rotate(1.5deg);
+  }
+}
+
+@keyframes float-b {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(2deg);
+  }
+  50% {
+    transform: translate(-10px, -8px) rotate(-1deg);
+  }
+}
+
+@keyframes float-c {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(-1deg);
+  }
+  50% {
+    transform: translate(8px, 10px) rotate(2deg);
+  }
+}
+
+.float-a {
+  animation: float-a 9s ease-in-out infinite;
+}
+.float-b {
+  animation: float-b 11s ease-in-out infinite;
+}
+.float-c {
+  animation: float-c 13s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .float-a,
+  .float-b,
+  .float-c {
+    animation: none;
+  }
+}

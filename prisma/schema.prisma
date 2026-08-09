@@ -1,0 +1,214 @@
+// Datenmodell der Lost.-Plattform.
+// SQLite kennt keine Prisma-Enums — Rollen/Status sind Strings mit festen Werten,
+// die in src/lib/rbac.ts bzw. den jeweiligen Domänen-Modulen als Konstanten leben.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String    @id @default(cuid())
+  email             String    @unique
+  passwordHash      String
+  // Anzeigename oder Pseudonym — Anonymität ist Grundprinzip, Klarname ist optional.
+  displayName       String
+  role              String    @default("CLIENT") // CLIENT | ADVISOR | ADMIN
+  twoFactorEnabled  Boolean   @default(false)
+  // TOTP-Secret, mit ENCRYPTION_KEY verschlüsselt (AES-256-GCM, base64).
+  twoFactorSecret   String?
+  createdAt         DateTime  @default(now())
+
+  sessions             Session[]
+  recoveryCodes        RecoveryCode[]
+  advisorProfile       AdvisorProfile?
+  application          Application?      @relation("Applicant")
+  decidedApplications  Application[]     @relation("Decisions")
+  invoiceSettings      InvoiceSettings?
+  messages             Message[]
+  clientConversations  Conversation[]    @relation("ClientConversations")
+  advisorConversations Conversation[]    @relation("AdvisorConversations")
+  invoicesIssued       Invoice[]         @relation("IssuedInvoices")
+  invoicesReceived     Invoice[]         @relation("ReceivedInvoices")
+  storedFiles          StoredFile[]
+}
+
+model Session {
+  id                String   @id // SHA-256-Hash des Cookie-Tokens — Klartext-Token steht nie in der DB
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // false, solange ein 2FA-pflichtiger Login den TOTP-Schritt noch nicht bestanden hat.
+  twoFactorVerified Boolean  @default(false)
+  expiresAt         DateTime
+  createdAt         DateTime @default(now())
+
+  @@index([userId])
+}
+
+model RecoveryCode {
+  id       String    @id @default(cuid())
+  userId   String
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash String
+  usedAt   DateTime?
+
+  @@index([userId])
+}
+
+// Öffentliches Berater-Profil — sichtbar für eingeloggte Klient:innen.
+model AdvisorProfile {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  firstName String
+  lastName  String
+  age       Int
+  languages String // kommagetrennt, z. B. "Deutsch, Englisch"
+  bio       String
+  photoUrl  String? // /berater/*.svg (Seed) oder /api/files/<id> (Upload)
+  published Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Bewerbung „Als Lebensberater:in bewerben".
+model Application {
+  id          String    @id @default(cuid())
+  userId      String    @unique
+  user        User      @relation("Applicant", fields: [userId], references: [id], onDelete: Cascade)
+  firstName   String
+  lastName    String
+  age         Int
+  birthPlace  String
+  languages   String
+  text        String // Bewerbungs-Freitext
+  status      String    @default("PENDING") // PENDING | ACCEPTED | REJECTED
+  contactedAt DateTime? // gesetzt, wenn ein Admin Kontakt aufgenommen hat
+  decidedAt   DateTime?
+  decidedById String?
+  decidedBy   User?     @relation("Decisions", fields: [decidedById], references: [id])
+  createdAt   DateTime  @default(now())
+
+  documents ApplicationDocument[]
+}
+
+model ApplicationDocument {
+  id            String      @id @default(cuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  kind          String // AUSWEIS | GEWERBESCHEIN | OPTIONAL
+  fileId        String      @unique
+  file          StoredFile  @relation(fields: [fileId], references: [id], onDelete: Cascade)
+}
+
+// Jede hochgeladene Datei liegt AES-256-GCM-verschlüsselt unter storage/ und wird
+// ausschließlich über /api/files/[id] mit Berechtigungsprüfung ausgeliefert.
+model StoredFile {
+  id         String   @id @default(cuid())
+  ownerId    String
+  owner      User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  kind       String // APPLICATION_DOC | ADVISOR_LOGO | PROFILE_PHOTO
+  fileName   String // Originalname
+  mimeType   String
+  size       Int
+  storedName String   @unique // Dateiname auf der Platte (verschlüsselter Blob)
+  createdAt  DateTime @default(now())
+
+  applicationDocument ApplicationDocument?
+}
+
+// Unterhaltung zwischen genau zwei Personen.
+// kind ADVISORY:    clientId = Klient:in, advisorId = Berater:in
+// kind APPLICATION: clientId = Bewerber:in, advisorId = Admin (Kontaktaufnahme zur Bewerbung)
+model Conversation {
+  id                String   @id @default(cuid())
+  kind              String   @default("ADVISORY") // ADVISORY | APPLICATION
+  clientId          String
+  client            User     @relation("ClientConversations", fields: [clientId], references: [id], onDelete: Cascade)
+  advisorId         String
+  advisor           User     @relation("AdvisorConversations", fields: [advisorId], references: [id], onDelete: Cascade)
+  // true, sobald die Klient:in mindestens eine Nachricht gesendet hat.
+  // Erst dann erscheint sie in der Kund:innenliste und darf Rechnungen erhalten.
+  clientHasMessaged Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  lastMessageAt     DateTime @default(now())
+
+  messages Message[]
+
+  @@unique([clientId, advisorId])
+  @@index([advisorId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  body           String
+  createdAt      DateTime     @default(now())
+  readAt         DateTime?
+
+  @@index([conversationId, createdAt])
+}
+
+// Rechnungsvorlage + Stammdaten einer Berater:in.
+model InvoiceSettings {
+  id                String  @id @default(cuid())
+  advisorId         String  @unique
+  advisor           User    @relation(fields: [advisorId], references: [id], onDelete: Cascade)
+  businessName      String?
+  addressLine1      String?
+  addressLine2      String?
+  vatId             String? // UID, optional
+  iban              String?
+  defaultService    String? // z. B. "Lebensberatung, Einzelgespräch (60 Min)"
+  defaultUnitPrice  Int? // Cent
+  footerText        String?
+  logoFileId        String? // StoredFile-Id (ADVISOR_LOGO)
+  nextInvoiceNumber Int     @default(1)
+}
+
+model Invoice {
+  id          String    @id @default(cuid())
+  number      String // pro Berater:in fortlaufend, z. B. "2026-0001"
+  advisorId   String
+  advisor     User      @relation("IssuedInvoices", fields: [advisorId], references: [id])
+  clientId    String
+  client      User      @relation("ReceivedInvoices", fields: [clientId], references: [id])
+  // Optionaler Klarname der Empfänger:in (Klient:innen dürfen pseudonym sein).
+  recipient   String?
+  issuedAt    DateTime  @default(now())
+  serviceDate DateTime?
+  dueAt       DateTime?
+  note        String?
+  totalCents  Int
+
+  items InvoiceItem[]
+
+  @@unique([advisorId, number])
+  @@index([clientId])
+}
+
+model InvoiceItem {
+  id             String  @id @default(cuid())
+  invoiceId      String
+  invoice        Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  position       Int
+  description    String
+  quantity       Int
+  unitPriceCents Int
+}
+
+model Event {
+  id          String   @id @default(cuid())
+  title       String
+  date        DateTime
+  location    String
+  description String
+  createdAt   DateTime @default(now())
+}
